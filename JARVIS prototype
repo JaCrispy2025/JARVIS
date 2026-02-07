@@ -1,0 +1,281 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { 
+  ShieldAlert, Mic, Camera, Lock, Unlock, Zap, 
+  Globe, Thermometer, Clock, Target, Cpu, 
+  Activity, Terminal, Eye, AlertTriangle, Fingerprint, Volume2, VolumeX
+} from 'lucide-react';
+
+const API_KEY = ""; // Gemini API Key
+const WEATHER_KEY = "282a33c97be3aed76f266be932debd73";
+const PASSCODE = "alpha delta nine";
+const WAKEUP_WORD = "jarvis";
+
+const App = () => {
+  const [authState, setAuthState] = useState('LOCKED'); 
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState('');
+  const [precision, setPrecision] = useState(0.9999);
+  const [weather, setWeather] = useState({ temp: '--', desc: 'ENCRYPTED' });
+  const [time, setTime] = useState(new Date());
+  const [isTyping, setIsTyping] = useState(false);
+  const [isAwake, setIsAwake] = useState(false);
+  const [isMonitoring, setIsMonitoring] = useState(false);
+  
+  const videoRef = useRef(null);
+  const chatEndRef = useRef(null);
+  const recognitionRef = useRef(null);
+
+  useEffect(() => {
+    const timer = setInterval(() => setTime(new Date()), 1000);
+    fetchWeather();
+    return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    if (chatEndRef.current) chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, isTyping]);
+
+  // --- CONTINUOUS LISTENING LOGIC ---
+  useEffect(() => {
+    if (authState === 'AUTHORIZED' && !recognitionRef.current) {
+      initPassiveListening();
+    }
+  }, [authState]);
+
+  const initPassiveListening = () => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) return;
+
+    const recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = false;
+    recognition.lang = 'en-US';
+
+    recognition.onstart = () => {
+      setIsMonitoring(true);
+      console.log("Passive Monitoring: ONLINE");
+    };
+
+    recognition.onresult = (event) => {
+      const last = event.results.length - 1;
+      const transcript = event.results[last][0].transcript.toLowerCase().trim();
+      
+      console.log("Detected:", transcript);
+
+      if (!isAwake && transcript.includes(WAKEUP_WORD)) {
+        wakeJarvis();
+      } else if (isAwake) {
+        // If already awake, treat as a command
+        handleAI(transcript);
+        setIsAwake(false); // Return to sleep after command
+      }
+    };
+
+    recognition.onend = () => {
+      // Auto-restart to maintain "Always-On" status
+      if (authState === 'AUTHORIZED') {
+        recognition.start();
+      }
+    };
+
+    recognition.start();
+    recognitionRef.current = recognition;
+  };
+
+  const wakeJarvis = () => {
+    setIsAwake(true);
+    // Visual cue for the user
+    setTimeout(() => setIsAwake(false), 8000); // Auto-sleep after 8s of inactivity
+  };
+
+  const fetchWeather = async () => {
+    try {
+      const res = await fetch(`https://api.openweathermap.org/data/2.5/weather?q=Vevay&appid=${WEATHER_KEY}&units=imperial`);
+      const data = await res.json();
+      if (data.main) setWeather({ temp: Math.round(data.main.temp), desc: data.weather[0].main.toUpperCase() });
+    } catch (e) {}
+  };
+
+  const startAuth = async () => {
+    setAuthState('SCANNING');
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      if (videoRef.current) videoRef.current.srcObject = stream;
+      
+      let cur = 0.8500;
+      const interval = setInterval(() => {
+        cur = Math.max(0.1300 + Math.random() * 0.0200, cur - 0.05);
+        setPrecision(cur.toFixed(4));
+        if (cur <= 0.1550) {
+          clearInterval(interval);
+          setAuthState('PASSCODE');
+        }
+      }, 70);
+    } catch (e) { setAuthState('LOCKED'); }
+  };
+
+  const handleAI = async (query) => {
+    if (!query || query === WAKEUP_WORD) return;
+    setMessages(prev => [...prev, { role: 'sir', text: query }]);
+    setIsTyping(true);
+
+    const prompt = `You are J.A.R.V.I.S. Mark III Level 10. 
+    Address user as Sir. Location: Vevay, IN. 
+    MANDATE: Strictly HONEST, UNBIASED, and NON-PARTISAN regarding politics/government. 
+    STRICT CONCISENESS: Responses must be short, witty, and objective. No political favors.`;
+    
+    try {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${API_KEY}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents: [{ parts: [{ text: query }] }], systemInstruction: { parts: [{ text: prompt }] } })
+      });
+      const data = await res.json();
+      const reply = data.candidates?.[0]?.content?.parts?.[0]?.text || "Neural logic error, Sir.";
+      setMessages(prev => [...prev, { role: 'jarvis', text: reply }]);
+    } catch (e) {
+      setMessages(prev => [...prev, { role: 'jarvis', text: "Uplink severed." }]);
+    } finally {
+      setIsTyping(false);
+      setIsAwake(false);
+    }
+  };
+
+  if (authState !== 'AUTHORIZED') {
+    return (
+      <div className="min-h-screen bg-[#020202] flex flex-col items-center justify-center p-8 font-mono text-red-600">
+        <div className="relative w-80 h-[520px] border-2 border-red-900 bg-black rounded-lg flex flex-col items-center justify-center shadow-[0_0_80px_rgba(255,0,0,0.2)] overflow-hidden">
+          <div className="absolute inset-0 bg-[linear-gradient(rgba(255,0,0,0.03)_1px,transparent_1px)] bg-[size:100%_4px] animate-pulse" />
+          <video ref={videoRef} autoPlay muted className="absolute inset-0 w-full h-full object-cover grayscale brightness-[0.2] contrast-200" />
+          
+          <div className="z-10 flex flex-col items-center gap-8 w-full">
+            <Fingerprint size={80} className="animate-pulse text-red-800" />
+            <div className="text-center px-4 py-6 bg-black/90 border-y-2 border-red-900/50 w-full space-y-2">
+              <div className="text-[9px] tracking-[0.8em] font-bold uppercase opacity-50">Absolute Zero Matrix</div>
+              <div className="text-4xl font-bold font-sans tracking-tight text-red-600">
+                {authState === 'SCANNING' ? precision : 'LOCKED'}
+              </div>
+              <div className="text-[10px] uppercase opacity-40">Target Margin: 0.1500</div>
+            </div>
+          </div>
+          <div className="absolute bottom-6 w-full px-6 flex justify-between text-[8px] uppercase tracking-widest opacity-30 font-bold">
+            <span>Scan: {authState}</span>
+            <span>Auth: LEVEL_10</span>
+          </div>
+        </div>
+
+        <div className="mt-8 text-center">
+          <h1 className="text-6xl font-black tracking-[1.2em] text-red-700 mb-8 drop-shadow-[0_0_25px_rgba(255,0,0,0.9)] ml-6">JARVIS</h1>
+          {authState === 'LOCKED' && (
+            <button onClick={startAuth} className="px-20 py-4 border-2 border-red-700 bg-red-950/10 hover:bg-red-700 hover:text-white transition-all font-black tracking-[0.5em] uppercase text-sm">
+              Initialize Level 10
+            </button>
+          )}
+          {authState === 'PASSCODE' && (
+            <div className="flex flex-col items-center gap-6 animate-in fade-in slide-in-from-bottom-6 duration-700">
+              <input 
+                type="password" 
+                placeholder="STATE PASSCODE"
+                className="bg-transparent border-b-2 border-red-700 text-center text-4xl tracking-[1.2em] focus:outline-none uppercase w-96 text-red-600"
+                onChange={(e) => e.target.value.toLowerCase() === PASSCODE && setAuthState('AUTHORIZED')}
+                autoFocus
+              />
+              <span className="text-[10px] opacity-40 italic uppercase tracking-widest tracking-tighter">alpha delta nine</span>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-[#010101] text-cyan-400 p-6 font-['Orbitron'] flex flex-col gap-4">
+      {/* HUD HEADER */}
+      <div className="flex justify-between items-center border-b-2 border-cyan-900/40 pb-6 relative">
+        <div className="flex items-center gap-6">
+          <div className={`w-16 h-16 rounded-full border-2 transition-all duration-500 flex items-center justify-center ${isAwake ? 'border-cyan-400 shadow-[0_0_20px_#00f2ff] animate-spin-slow' : 'border-cyan-900/40'}`}>
+            <Target size={28} className={isAwake ? 'text-cyan-400' : 'text-cyan-900'} />
+          </div>
+          <div>
+            <div className="text-[11px] opacity-50 tracking-[0.5em] uppercase flex items-center gap-2">
+              {isMonitoring ? <Volume2 size={12} className="text-green-500 animate-pulse" /> : <VolumeX size={12} />} 
+              {isAwake ? 'Neural Bridge Active' : 'Passive Listening Mode'}
+            </div>
+            <h1 className={`text-4xl font-black tracking-[0.1em] transition-all duration-500 ${isAwake ? 'text-cyan-400 glow-text' : 'text-cyan-900'}`}>MARK III [v.10]</h1>
+          </div>
+        </div>
+        <div className="text-right">
+          <div className="flex gap-6 text-[11px] opacity-70 mb-2 uppercase font-mono tracking-widest">
+             <span className="flex items-center gap-2 text-cyan-200"><Thermometer size={14}/> {weather.temp}°F • {weather.desc}</span>
+             <span className="flex items-center gap-2 text-cyan-200"><Globe size={14}/> VEVAY, IN</span>
+          </div>
+          <div className="text-3xl font-black text-cyan-500 tracking-tighter">
+            <Clock size={24} className="inline mr-3"/> {time.toLocaleTimeString('en-US', { hour12: false })}
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-12 gap-6 flex-grow overflow-hidden">
+        <div className="col-span-3 flex flex-col gap-4">
+          <div className="border border-cyan-900/60 bg-black/60 p-6 rounded-lg flex-grow">
+            <span className="text-[11px] font-black border-b-2 border-cyan-900/30 block mb-6 uppercase tracking-[0.3em] text-cyan-600">Secure Anchor</span>
+            <div className="aspect-[4/5] rounded border-2 border-cyan-500/20 overflow-hidden relative grayscale">
+               <video ref={videoRef} autoPlay muted className="w-full h-full object-cover opacity-20" />
+               <div className="absolute top-0 w-full h-1 bg-cyan-500/40 animate-scan" />
+            </div>
+            <div className="mt-8 space-y-6 text-[10px] uppercase tracking-[0.2em] font-mono">
+               <div className="flex justify-between items-center"><span className="opacity-60">Status</span><span className={isMonitoring ? "text-green-500" : "text-red-500"}>{isMonitoring ? "MONITORING" : "OFFLINE"}</span></div>
+               <div className="flex justify-between items-center"><span className="opacity-60">Wakeup</span><span className="text-cyan-400">"JARVIS"</span></div>
+               <div className="border-t border-cyan-900/40 pt-6">
+                 <div className="flex justify-between mb-2"><span>Logic Rail</span><span className="text-cyan-400 italic">NON_BIASED</span></div>
+                 <div className="flex justify-between"><span>Directive</span><span className="text-cyan-400 font-bold">HONESTY</span></div>
+               </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="col-span-9 border-2 border-cyan-900/40 bg-black/50 rounded-lg flex flex-col overflow-hidden relative">
+          <div className="flex-grow overflow-y-auto p-10 space-y-8 custom-scrollbar">
+             {!isAwake && messages.length === 0 && (
+               <div className="flex flex-col items-center justify-center h-full opacity-20 text-center space-y-4">
+                  <Mic size={48} className="animate-pulse" />
+                  <p className="text-sm tracking-[0.5em] uppercase">Listening for Wakeup Command: "Jarvis"</p>
+               </div>
+             )}
+            {messages.map((m, i) => (
+              <div key={i} className={`flex flex-col gap-3 ${m.role === 'sir' ? 'items-end' : 'items-start'}`}>
+                <span className={`text-[11px] font-black uppercase tracking-[0.4em] ${m.role === 'sir' ? 'text-cyan-700' : 'text-blue-600'}`}>{m.role === 'sir' ? 'Master Authority' : 'J.A.R.V.I.S.'}</span>
+                <div className={`p-6 rounded-lg border-2 ${m.role === 'sir' ? 'bg-cyan-500/5 border-cyan-500/10 text-cyan-50' : 'bg-blue-600/5 border-blue-600/10 text-blue-50'} max-w-[80%] text-sm leading-relaxed`}>{m.text}</div>
+              </div>
+            ))}
+            {isTyping && <div className="text-[11px] uppercase text-cyan-500 animate-pulse flex items-center gap-3"><Cpu size={14}/> Processing Objective Reality...</div>}
+            <div ref={chatEndRef} />
+          </div>
+          <div className="p-8 bg-black/90 border-t-2 border-cyan-900/40 flex items-center gap-6">
+            <Terminal size={24} className={isAwake ? "text-cyan-400 animate-pulse" : "opacity-30"} />
+            <input 
+              onKeyDown={(e) => e.key === 'Enter' && (handleAI(e.target.value), e.target.value='')}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder={isAwake ? "Awaiting Command..." : "System Idle. Say 'Jarvis' to wake..."}
+              className={`flex-grow bg-transparent text-cyan-50 placeholder-cyan-900/30 text-base focus:outline-none transition-opacity duration-300 ${isAwake ? 'opacity-100' : 'opacity-40'}`}
+            />
+          </div>
+        </div>
+      </div>
+      <style>{`
+        .glow-text { text-shadow: 0 0 25px rgba(0,242,255,0.4); }
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #0e7490; border-radius: 10px; }
+        @keyframes scan { 0% { top: 0; } 100% { top: 100%; } }
+        .animate-scan { animation: scan 4s linear infinite; }
+        .animate-spin-slow { animation: spin 12s linear infinite; }
+        body { letter-spacing: 0.1em; }
+      `}</style>
+    </div>
+  );
+};
+
+export default App;
+
+
